@@ -1,0 +1,14 @@
+{
+    "name": "recording-service",
+    "version": "0.0.1",
+    "scripts": {
+        "build": "nest build",
+        "start": "nest start"
+    },
+    "dependencies": {
+        "@nestjs/common": "^10.0.0",
+        "@nestjs/core": "^10.0.0",
+        "mediasoup-client": "^3.7.0",
+        "fluent-ffmpeg": "^2.1.2"
+    }
+}

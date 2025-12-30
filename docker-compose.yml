@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: zoom
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  coturn:
+    image: coturn/coturn
+    network_mode: host
+    command: 
+      - -n 
+      - --log-file=stdout 
+      - --min-port=49160 
+      - --max-port=49200 
+      - --realm=zoom-clone.local
+      - --user=user:password
+      - --lt-cred-mech
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.auth
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgres://user:password@postgres:5432/zoom
+      JWT_SECRET: secretKey
+    depends_on:
+      - postgres
+
+  meeting-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.meeting
+    ports:
+      - "3002:3002"
+      - "5001:5001"
+    environment:
+      DATABASE_URL: postgres://user:password@postgres:5432/zoom
+    depends_on:
+      - postgres
+
+  signaling-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.signaling
+    ports:
+      - "3003:3003"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - redis
+
+  media-sfu:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.media
+    ports:
+      - "3004:3004"
+      - "10000-10100:10000-10100/udp"
+      - "10000-10100:10000-10100/tcp"
+    environment:
+      ANNOUNCED_IP: 127.0.0.1
+    depends_on:
+      - signaling-service
+
+  recording-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.recording
+    environment:
+      SFU_URL: http://media-sfu:3004
+    depends_on:
+      - media-sfu
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_SIGNALING_URL: http://localhost:3003
+      NEXT_PUBLIC_SFU_URL: http://localhost:3004
+
+volumes:
+  pgdata:

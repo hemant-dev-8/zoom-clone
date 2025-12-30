@@ -1,0 +1,23 @@
+# Base Dockerfile for NestJS services
+FROM node:18-alpine As base
+RUN npm i -g pnpm turbo
+
+FROM base AS builder
+WORKDIR /app
+COPY . .
+RUN turbo prune --scope=auth-service --docker
+
+FROM base AS installer
+WORKDIR /app
+COPY --from=builder /app/out/json/ .
+COPY --from=builder /app/out/pnpm-lock.yaml ./
+RUN pnpm install
+
+COPY --from=builder /app/out/full/ .
+COPY turbo.json turbo.json
+RUN turbo run build --filter=auth-service...
+
+FROM base AS runner
+WORKDIR /app
+COPY --from=installer /app .
+CMD ["node", "apps/auth-service/dist/main.js"]

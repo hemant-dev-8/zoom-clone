@@ -1,0 +1,24 @@
+FROM node:18-alpine AS base
+RUN npm i -g pnpm turbo
+RUN apk add --no-cache ffmpeg
+
+FROM base AS builder
+WORKDIR /app
+COPY . .
+RUN turbo prune --scope=recording-service --docker
+
+FROM base AS installer
+WORKDIR /app
+COPY --from=builder /app/out/json/ .
+COPY --from=builder /app/out/pnpm-lock.yaml ./
+RUN pnpm install
+
+COPY --from=builder /app/out/full/ .
+COPY turbo.json turbo.json
+RUN turbo run build --filter=recording-service...
+
+FROM base AS runner
+WORKDIR /app
+COPY --from=installer /app .
+RUN apk add --no-cache ffmpeg
+CMD ["node", "apps/recording-service/dist/main.js"]

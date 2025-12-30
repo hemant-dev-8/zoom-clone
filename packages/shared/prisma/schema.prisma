@@ -1,0 +1,141 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+}
+
+enum ParticipantRole {
+  HOST
+  CO_HOST
+  GUEST
+}
+
+enum StreamType {
+  VIDEO
+  AUDIO
+  SCREEN
+}
+
+enum RecordingStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  avatarUrl     String?
+  role          UserRole  @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  meetings      Meeting[]
+  devices       Device[]
+  sessions      Session[]
+  participants  Participant[]
+  messages      ChatMessage[]
+}
+
+model Device {
+  id         String   @id @default(uuid())
+  userId     String
+  deviceId   String   @unique
+  type       String   // web, mobile, desktop
+  pushToken  String?
+  lastSeen   DateTime @default(now())
+  
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  ipAddress    String?
+  
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+model Meeting {
+  id          String        @id @default(uuid())
+  hostId      String
+  title       String
+  startTime   DateTime      @default(now())
+  status      MeetingStatus @default(SCHEDULED)
+  settings    Json?         // { "muteOnEntry": true, "waitingRoom": true }
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  host        User          @relation(fields: [hostId], references: [id])
+  participants Participant[]
+  messages    ChatMessage[]
+  recordings  Recording[]
+}
+
+model Participant {
+  id          String          @id @default(uuid())
+  meetingId   String
+  userId      String?
+  name        String
+  role        ParticipantRole @default(GUEST)
+  joinedAt    DateTime        @default(now())
+  leftAt      DateTime?
+
+  meeting     Meeting         @relation(fields: [meetingId], references: [id])
+  user        User?           @relation(fields: [userId], references: [id])
+  streams     Stream[]
+  messages    ChatMessage[]
+}
+
+model Stream {
+  id            String      @id @default(uuid())
+  participantId String
+  producerId    String      // Mediasoup producer ID
+  type          StreamType
+  active        Boolean     @default(true)
+  
+  participant   Participant @relation(fields: [participantId], references: [id])
+}
+
+model ChatMessage {
+  id            String      @id @default(uuid())
+  meetingId     String
+  senderId      String?     // Null if system message
+  participantId String?
+  content       String
+  timestamp     DateTime    @default(now())
+  
+  meeting       Meeting     @relation(fields: [meetingId], references: [id])
+  sender        User?       @relation(fields: [senderId], references: [id])
+  participant   Participant? @relation(fields: [participantId], references: [id])
+}
+
+model Recording {
+  id          String          @id @default(uuid())
+  meetingId   String
+  filePath    String
+  size        Int?            // Bytes
+  duration    Int?            // Seconds
+  status      RecordingStatus @default(PROCESSING)
+  startedAt   DateTime        @default(now())
+  
+  meeting     Meeting         @relation(fields: [meetingId], references: [id])
+}

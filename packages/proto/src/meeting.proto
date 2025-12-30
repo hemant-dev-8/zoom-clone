@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package meeting;
+
+service MeetingService {
+  rpc CreateMeeting (CreateMeetingRequest) returns (MeetingResponse);
+  rpc GetMeeting (GetMeetingRequest) returns (MeetingResponse);
+  rpc ValidatePasscode (ValidatePasscodeRequest) returns (ValidatePasscodeResponse);
+}
+
+message CreateMeetingRequest {
+  string host_id = 1;
+  string title = 2;
+  string start_time = 3;
+  bool waiting_room = 4;
+}
+
+message MeetingResponse {
+  string id = 1;
+  string title = 2;
+  string host_id = 3;
+  string start_time = 4;
+  string status = 5;
+}
+
+message GetMeetingRequest {
+  string id = 1;
+}
+
+message ValidatePasscodeRequest {
+  string meeting_id = 1;
+  string passcode = 2;
+}
+
+message ValidatePasscodeResponse {
+  bool valid = 1;
+}
