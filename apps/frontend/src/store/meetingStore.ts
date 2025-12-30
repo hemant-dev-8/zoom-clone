@@ -9,6 +9,7 @@ interface MeetingState {
     setUserId: (id: string) => void;
     addPeer: (peer: any) => void;
     removePeer: (peerId: string) => void;
+    setPeers: (peers: Record<string, any>) => void;
 }
 
 export const useMeetingStore = create<MeetingState>((set) => ({
@@ -23,4 +24,5 @@ export const useMeetingStore = create<MeetingState>((set) => ({
         const { [id]: _, ...rest } = state.peers;
         return { peers: rest };
     }),
+    setPeers: (peers) => set({ peers }),
 }));

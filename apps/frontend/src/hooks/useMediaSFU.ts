@@ -3,7 +3,7 @@ import { Device } from 'mediasoup-client';
 import { io, Socket } from 'socket.io-client';
 import { useMeetingStore } from '../store/meetingStore';
 
-const SFU_URL = 'http://localhost:3004'; // Media SFU
+const SFU_URL = process.env.NEXT_PUBLIC_MEDIA_SFU_URL || 'http://localhost:3004'; // Media SFU
 
 export const useMediaSFU = (meetingId: string) => {
     const device = useRef(new Device());
