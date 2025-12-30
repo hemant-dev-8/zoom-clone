@@ -1,0 +1,317 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+# Restrict permissions to minimum required (security best practice)
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  NODE_VERSION: '18.x'
+  PNPM_VERSION: '8.15.5'
+
+jobs:
+  # Job 1: Install dependencies and cache
+  install:
+    name: Install Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better caching
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        # --frozen-lockfile ensures lockfile is not modified, fails if out of sync
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+  # Job 2: Lint and Type Check (runs in parallel with tests)
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    needs: install
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Restore node_modules cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Run ESLint
+        run: pnpm run lint
+        # Fails on any lint errors
+
+      - name: TypeScript Type Check
+        run: pnpm exec turbo run type-check
+        # Runs tsc --noEmit across all packages
+        continue-on-error: false
+
+  # Job 3: Database & Tests
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: install
+    timeout-minutes: 10
+
+    # PostgreSQL service container
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: zoom_clone_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/zoom_clone_test
+      NODE_ENV: test
+      JWT_SECRET: test-jwt-secret-key-for-ci
+      JWT_REFRESH_SECRET: test-jwt-refresh-secret-key-for-ci
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Restore node_modules cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Generate Prisma Client
+        run: pnpm run db:generate
+        # Generates Prisma client from schema
+
+      - name: Run Database Migrations
+        run: |
+          cd packages/shared
+          pnpm exec prisma migrate deploy
+        # Applies all migrations to test database
+
+      - name: Verify Database Schema
+        run: |
+          cd packages/shared
+          pnpm exec prisma db push --skip-generate
+        # Ensures schema matches migrations, fails on mismatch
+
+      - name: Run Unit Tests
+        run: pnpm exec turbo run test --concurrency=1
+        # Runs Jest tests across all packages
+        # --concurrency=1 prevents DB conflicts in tests
+
+      - name: Upload Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            apps/*/coverage
+            packages/*/coverage
+          retention-days: 7
+
+  # Job 4: Build Validation
+  build:
+    name: Build All Services
+    runs-on: ubuntu-latest
+    needs: install
+    timeout-minutes: 10
+
+    env:
+      # Build-time environment variables (non-sensitive)
+      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+      NODE_ENV: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Restore node_modules cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Generate Prisma Client
+        run: pnpm run db:generate
+
+      - name: Build all packages and apps
+        run: pnpm run build
+        # Uses Turbo to build all services in dependency order
+
+      - name: Verify build artifacts
+        run: |
+          # Check NestJS services built successfully
+          test -d apps/auth-service/dist || exit 1
+          test -d apps/meeting-service/dist || exit 1
+          test -d apps/signaling-service/dist || exit 1
+          
+          # Check Next.js built successfully
+          test -d apps/frontend/.next || exit 1
+          
+          echo "✅ All build artifacts verified"
+
+      - name: Upload build artifacts
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            apps/*/dist
+            apps/frontend/.next
+          retention-days: 7
+
+  # Job 5: Security Audit (free tier)
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    needs: install
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Run pnpm audit
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
+        # Continue on error but log vulnerabilities
+
+      - name: Check for known vulnerabilities
+        run: |
+          pnpm audit --json > audit-report.json || true
+          echo "📊 Security audit completed"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit
+          path: audit-report.json
+          retention-days: 30
+
+  # Job 6: Final Status Check
+  ci-success:
+    name: CI Pipeline Success
+    runs-on: ubuntu-latest
+    needs: [lint, test, build, security]
+    if: always()
+    timeout-minutes: 1
+
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ]; then
+            echo "❌ Lint job failed"
+            exit 1
+          fi
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "❌ Test job failed"
+            exit 1
+          fi
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "❌ Build job failed"
+            exit 1
+          fi
+          echo "✅ All CI checks passed successfully!"
